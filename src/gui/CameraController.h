@@ -151,6 +151,7 @@ signals:
 private:
     std::shared_ptr<Device> m_device;
     bool m_connected;
+    unsigned int m_connectionGeneration = 0;
     QString m_selectedDevicePath;
     bool m_v4l2Only = false;
     V4l2Backend m_v4l2;

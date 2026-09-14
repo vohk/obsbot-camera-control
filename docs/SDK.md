@@ -134,3 +134,40 @@ The `ObsbotProductType` enum in `dev.hpp`:
 | `ObsbotProdTail2S` | Tail 2S |
 | `ObsbotProdHDMIBox` | HDMI Box |
 | `ObsbotProdNDIBox` | NDI Box |
+
+## Meet SE HDR and asynchronous discovery
+
+A connected Meet SE (firmware 4.6.4.1) was verified with SDK v1.0.2:
+`cameraSetWdrR(DevWdrModeDol2TO1)` enabled HDR, and `DevWdrModeNone` disabled it.
+`cameraStatus().tiny.hdr` reported off/on/off across the test. No special raw USB
+command is needed. The status `hdr_support` was zero even when switching worked,
+so it must not be treated as an authoritative capability gate for this model.
+
+SDK USB enumeration runs asynchronously. Falling back to V4L2 immediately after
+registering detection can prevent vendor controls from becoming available. The
+GUI now allows 10 seconds for discovery before fallback and keeps discovery
+alive so a late SDK detection can enable the full controls. SDK callbacks are
+queued onto the Qt controller thread, and stale connection attempts are ignored.
+
+Meet SE HDR supports up to 1080p at 60 fps; see the
+[manufacturer FAQ](https://www.obsbot.jp/jp/obsbot-meet-se-full-hd-webcam/faq).
+The SDK recommends at least three seconds between HDR switches.
+
+### Meet SE preview intervals
+
+Qt exposes each MJPEG resolution as a frame-rate range and selects its maximum
+(1080p100 or 720p150 on Meet SE). An HDR status bit changing does not establish
+that the output has HDR at those rates. The Meet SE preview now enumerates the
+actual V4L2 discrete intervals and captures MJPEG directly, using `VIDIOC_S_PARM`
+and checking `VIDIOC_G_PARM` before streaming. Other cameras keep the Qt path.
+Decoded images pass through the same GPU effects and virtual-camera pipeline.
+
+The default is 1080p60. The Meet SE menu offers only supported 30 and 60 fps
+modes at each resolution, omitting fractional duplicates and uncommon intervals.
+Enabling HDR while the negotiated camera rate exceeds 60 fails with
+instructions to first start a lower-rate preview. This app cannot constrain a
+separate application that opens the physical webcam at a higher rate.
+
+Hardware checks observed approximately 59.94 decoded fps at negotiated 60 fps
+and 29.97 decoded fps at negotiated 30 fps. Frames were decoded in memory only;
+this verifies capture cadence, not the visual effectiveness of the HDR processing.

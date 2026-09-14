@@ -25,6 +25,7 @@ public:
     std::string devicePath() const { return m_devicePath; }
 
     static std::string findObsbotDevice();
+    static double frameRateForDevice(const std::string &path);
     std::string cardName() const;
 
     int getControl(uint32_t id);

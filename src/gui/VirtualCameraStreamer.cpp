@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QImage>
+#include <QDir>
 #include <QLoggingCategory>
 #include <QMetaObject>
 #include <QMetaType>
@@ -18,6 +19,27 @@
 #include <unistd.h>
 
 Q_LOGGING_CATEGORY(VirtualCameraLog, "obsbot.virtualcamera")
+
+bool VirtualCameraStreamer::isLoopbackDevice(const QString &path)
+{
+    int fd = ::open(path.toLocal8Bit().constData(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return false;
+    v4l2_capability caps{};
+    const bool queried = ioctl(fd, VIDIOC_QUERYCAP, &caps) == 0;
+    ::close(fd);
+    return queried && (strcmp(reinterpret_cast<const char *>(caps.driver), "v4l2 loopback") == 0 ||
+                       strcmp(reinterpret_cast<const char *>(caps.driver), "v4l2loopback") == 0);
+}
+
+QStringList VirtualCameraStreamer::availableDevices()
+{
+    QStringList devices;
+    for (const auto &name : QDir(QStringLiteral("/dev")).entryList({"video*"}, QDir::System)) {
+        const QString path = QStringLiteral("/dev/") + name;
+        if (isLoopbackDevice(path)) devices.append(path);
+    }
+    return devices;
+}
 
 namespace {
 

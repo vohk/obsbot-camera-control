@@ -27,6 +27,8 @@ CameraController::CameraController(QObject *parent)
 
 CameraController::~CameraController()
 {
+    Devices::get().setDevChangedCallback({}, nullptr);
+    Devices::get().close();
 }
 
 void CameraController::connectToCamera()
@@ -36,6 +38,8 @@ void CameraController::connectToCamera()
 
 void CameraController::connectToCamera(const QString &devicePath)
 {
+    const auto generation = ++m_connectionGeneration;
+    if (m_v4l2ScanTimer) m_v4l2ScanTimer->stop();
     m_selectedDevicePath = devicePath;
 
     auto pickDevice = [this](const std::list<std::shared_ptr<Device>> &list)
@@ -49,32 +53,40 @@ void CameraController::connectToCamera(const QString &devicePath)
                 return dev;
         }
         qDebug() << "CameraController: device" << m_selectedDevicePath
-                 << "not found in SDK list, using first available";
-        return list.front();
+                 << "not found in SDK list";
+        return nullptr;
     };
 
-    auto onDevChanged = [this, pickDevice](std::string /*dev_sn*/, bool connected, void * /*param*/) {
-        if (connected) {
-            auto dev_list = Devices::get().getDevList();
-            auto dev = pickDevice(dev_list);
-            if (dev) {
-                m_device = dev;
-                m_connected = true;
-                m_cameraInfo.name = QString::fromStdString(m_device->devName());
-                m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
-                m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
-                m_cameraInfo.productType = m_device->productType();
-                m_cameraInfo.connected = true;
-                refreshControlRanges();
-                emit cameraConnected(m_cameraInfo);
-                updateState();
+    auto onDevChanged = [this, pickDevice, generation](std::string /*dev_sn*/, bool connected, void * /*param*/) {
+        // SDK notifications originate on its detection thread; Qt state belongs
+        // on the controller thread. Ignore notifications from an old connection.
+        QMetaObject::invokeMethod(this, [this, pickDevice, generation, connected]() {
+            if (generation != m_connectionGeneration) return;
+            if (connected) {
+                auto dev_list = Devices::get().getDevList();
+                auto dev = pickDevice(dev_list);
+                if (dev) {
+                    if (m_v4l2ScanTimer) m_v4l2ScanTimer->stop();
+                    m_v4l2.close();
+                    m_v4l2Only = false;
+                    m_device = dev;
+                    m_connected = true;
+                    m_cameraInfo.name = QString::fromStdString(m_device->devName());
+                    m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
+                    m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
+                    m_cameraInfo.productType = m_device->productType();
+                    m_cameraInfo.connected = true;
+                    refreshControlRanges();
+                    emit cameraConnected(m_cameraInfo);
+                    updateState();
+                }
+            } else {
+                m_connected = false;
+                m_cameraInfo.connected = false;
+                resetControlRanges();
+                emit cameraDisconnected();
             }
-        } else {
-            m_connected = false;
-            m_cameraInfo.connected = false;
-            resetControlRanges();
-            emit cameraDisconnected();
-        }
+        }, Qt::QueuedConnection);
     };
 
     Devices::get().setDevChangedCallback(onDevChanged, nullptr);
@@ -95,14 +107,21 @@ void CameraController::connectToCamera(const QString &devicePath)
             emit cameraConnected(m_cameraInfo);
             updateState();
         }
-    } else {
-        tryV4l2Fallback();
+    }
+    if (!m_connected) {
+        // USB SDK discovery is asynchronous. Do not select the restricted
+        // V4L2 backend before it has had a chance to identify the camera.
+        QTimer::singleShot(10000, this, [this, generation]() {
+            if (generation == m_connectionGeneration && !m_connected)
+                tryV4l2Fallback();
+        });
     }
 }
 
 void CameraController::tryV4l2Fallback()
 {
-    auto path = V4l2Backend::findObsbotDevice();
+    auto path = m_selectedDevicePath.isEmpty()
+        ? V4l2Backend::findObsbotDevice() : m_selectedDevicePath.toStdString();
     if (!path.empty()) {
         connectV4l2(path);
         return;
@@ -114,7 +133,8 @@ void CameraController::tryV4l2Fallback()
         connect(m_v4l2ScanTimer, &QTimer::timeout, this, [this]() {
             if (m_connected)
                 return;
-            auto path = V4l2Backend::findObsbotDevice();
+            auto path = m_selectedDevicePath.isEmpty()
+                ? V4l2Backend::findObsbotDevice() : m_selectedDevicePath.toStdString();
             if (!path.empty()) {
                 m_v4l2ScanTimer->stop();
                 connectV4l2(path);
@@ -129,8 +149,7 @@ void CameraController::connectV4l2(const std::string &devicePath)
     if (!m_v4l2.open(devicePath))
         return;
 
-    Devices::get().close();
-
+    // Keep SDK discovery alive so a late detection can enable vendor controls.
     m_connected = true;
     m_v4l2Only = true;
     m_v4l2DevicePath = QString::fromStdString(devicePath);
@@ -207,6 +226,8 @@ void CameraController::updateV4l2State()
 
 void CameraController::disconnectFromCamera()
 {
+    ++m_connectionGeneration;
+    if (m_v4l2ScanTimer) m_v4l2ScanTimer->stop();
     if (m_connected) {
         if (m_v4l2Only) {
             m_v4l2.close();
@@ -444,6 +465,12 @@ bool CameraController::centerView()
 bool CameraController::setHDR(bool enabled)
 {
     if (!m_connected || m_v4l2Only) return false;
+
+    if (enabled && m_cameraInfo.productType == ObsbotProdMeetSE &&
+        V4l2Backend::frameRateForDevice(m_device->videoDevPath()) > 60.01) {
+        emit commandFailed(tr("Enable HDR: select and start a preview at 60 fps or below first"), -1);
+        return false;
+    }
 
     return executeCommand(enabled ? "Enable HDR" : "Disable HDR", [this, enabled]() {
         return m_device->cameraSetWdrR(enabled ? Device::DevWdrModeDol2TO1 : Device::DevWdrModeNone);

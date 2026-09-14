@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QImage>
 #include <QString>
+#include <QStringList>
 #include <QSize>
 
 class QThread;
@@ -22,6 +23,8 @@ class VirtualCameraStreamer : public QObject
     Q_OBJECT
 
 public:
+    static bool isLoopbackDevice(const QString &path);
+    static QStringList availableDevices();
     explicit VirtualCameraStreamer(QObject *parent = nullptr);
     ~VirtualCameraStreamer() override;
 

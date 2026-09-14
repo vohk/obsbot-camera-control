@@ -436,3 +436,91 @@ make -j$(nproc)
 - **Build Issues**: Check [GitHub Issues](https://github.com/aaronsb/obsbot-camera-control/issues)
 - **Usage Questions**: See main [README](../README.md)
 - **Report Bugs**: [Open an Issue](https://github.com/aaronsb/obsbot-camera-control/issues/new)
+
+## Build in Distrobox, run on Bazzite
+
+Build a relocatable directory containing the app, OBSBOT SDK, Qt libraries,
+plugins, and their userspace dependencies. Kernel modules and glibc remain on
+the host. Use a build distribution with glibc no newer than the host: Fedora 44
+matches Bazzite 44; a rolling Arch container may be too new.
+
+Inside a Fedora 44 Distrobox:
+
+```bash
+sudo dnf install cmake gcc-c++ make qt6-qtbase-devel qt6-qtmultimedia-devel qt6-qtwayland-devel patchelf
+cd /path/to/obsbot-camera-control
+./scripts/build-bundle.sh
+```
+
+Bundling requires Qt 6.10+. It creates `build-bundle/obsbot-control/` and a tarball
+beside it. Nothing is installed on the host. An alternative build directory can
+be set with `OBSBOT_BUILD_DIR=/absolute/path` (use separate directories per distro).
+
+From a **host terminal**, run the shared directory directly:
+
+```bash
+/path/to/obsbot-camera-control/build-bundle/obsbot-control/obsbot-control --check-runtime
+/path/to/obsbot-camera-control/build-bundle/obsbot-control/obsbot-control
+```
+
+The first command checks Qt, platform plugins, and camera enumeration without
+applying camera settings. The bundle can also be copied or extracted to a stable
+location such as `~/.local/opt/obsbot-control`; run its `obsbot-control` launcher.
+Do not use `distrobox-export` for this bundle: that launches inside the container.
+This is a bundle for a compatible host, not a universal Linux binary. Rebuild it
+after major distribution upgrades. GPU drivers still come from the host.
+
+Virtual camera output is optional; hardware controls and HDR do not require
+v4l2loopback. If the host already has an OBS virtual camera, select its existing
+`/dev/videoN` path in the app rather than loading another module. On the tested
+Bazzite host this was `/dev/video0`; `/dev/video1` was the physical Meet SE.
+Device numbers can change after reconnecting or rebooting.
+
+### Read-only hardware regression check
+
+With an SDK-supported OBSBOT attached:
+
+```bash
+cmake -S . -B build-test -DOBSBOT_BUILD_HARDWARE_TESTS=ON
+cmake --build build-test --target camera-discovery-test
+./bin/camera-discovery-test
+./bin/camera-discovery-test --cancel
+```
+
+This does not apply settings. It succeeds only if asynchronous discovery selects
+the SDK backend, and fails on V4L2 fallback or a 12-second detection timeout.
+
+### Existing loopback module, missing video42
+
+`modprobe` does not reconfigure a module that is already loaded. For example,
+Bazzite may already expose an OBS virtual camera at `/dev/video0`. Use the app's
+**Detect** button to choose an existing loopback node; physical webcams are not
+accepted as virtual outputs. Avoid having OBS and this app produce output to the
+same node simultaneously.
+
+If a separate `/dev/video42` is wanted, a host with `v4l2loopback-ctl` can add it
+without unloading the module or disrupting existing nodes:
+
+```bash
+sudo v4l2loopback-ctl add -n "OBSBOT Virtual Camera" -x 1 /dev/video42
+```
+
+This is a runtime addition, not persistent boot configuration. The app does not
+execute module-management commands automatically.
+
+### Preview hardware checks
+
+With preview closed in other applications, build the optional checks above and
+run these on the host (adjust the physical camera path):
+
+```bash
+cmake --build build-test --target mjpeg-capture-test preview-pipeline-test
+./bin/mjpeg-capture-test /dev/video1 60
+./bin/mjpeg-capture-test /dev/video1 30
+QT_QPA_PLATFORM=wayland ./bin/preview-pipeline-test /dev/video1
+```
+
+The first two verify the negotiated rate and decoded frame delivery. The last
+opens a temporary preview window, checks HDR-compatible choices, switches from
+1080p60 to 1080p30, and verifies GPU-processed images. Images stay in memory;
+these checks do not write recordings or apply saved camera settings.

@@ -78,6 +78,7 @@ public:
     void setVideoEffects(const VideoEffectsSettings &settings);
     VideoEffectsSettings videoEffects() const { return m_effectSettings; }
     void updateVideoFrame(const QVideoFrame &frame);
+    void updateImage(QImage image);
 
 signals:
     void processedFrameReady(const QImage &frame);

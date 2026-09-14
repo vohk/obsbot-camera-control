@@ -159,6 +159,20 @@ void CameraPreviewWidget::enablePreview(bool enabled)
     }
 }
 
+void CameraPreviewWidget::setHdrEnabled(bool enabled)
+{
+    if (m_hdrEnabled == enabled) return;
+    m_hdrEnabled = enabled;
+    const auto selected = std::find_if(m_nativeModes.begin(), m_nativeModes.end(),
+        [this](const auto &mode) { return mode.id() == m_selectedFormatId; });
+    if (enabled && m_nativeCapture && selected != m_nativeModes.end() && selected->fps() > 60.01) {
+        stopPreview();
+        startPreview();
+    } else if (!m_nativeModes.isEmpty()) {
+        refreshFormatOptions(resolveCameraDevice());
+    }
+}
+
 void CameraPreviewWidget::setPreferredFormatId(const QString &formatId)
 {
     const QString requestedId = formatId.isEmpty() ? QStringLiteral("auto") : formatId;
@@ -171,7 +185,8 @@ void CameraPreviewWidget::setPreferredFormatId(const QString &formatId)
     QSignalBlocker blocker(m_formatCombo);
     int index = m_formatCombo->findData(requestedId);
     if (index < 0) {
-        index = 0;
+        m_selectedFormatId = requestedId;
+        return;
     }
     m_formatCombo->setCurrentIndex(index);
     m_selectedFormatId = m_formatCombo->itemData(index).toString();
@@ -237,6 +252,14 @@ void CameraPreviewWidget::startPreview()
         return;
     }
 
+    if (m_nativeCapture) {
+        m_previewEnabled = true;
+        updateStatus(tr("Opening camera..."));
+        emit previewStateChanged(true);
+        m_nativeCapture->start();
+        return;
+    }
+
     applySelectedFormat();
     updateStatus(tr("Opening camera..."));
 
@@ -256,6 +279,11 @@ void CameraPreviewWidget::startPreview()
 void CameraPreviewWidget::stopPreview()
 {
     disconnect(m_snapshotConnection);
+    if (m_nativeCapture) {
+        disconnect(m_nativeCapture, nullptr, this, nullptr);
+        delete m_nativeCapture; // interrupts and joins before releasing camera buffers
+        m_nativeCapture = nullptr;
+    }
 
     if (m_videoSink) {
         disconnect(m_videoSink, nullptr, this, nullptr);
@@ -299,6 +327,33 @@ bool CameraPreviewWidget::initializeCamera()
     }
 
     refreshFormatOptions(device);
+    if (!m_nativeModes.isEmpty()) {
+        auto it = std::find_if(m_nativeModes.begin(), m_nativeModes.end(),
+            [this](const auto &mode) { return mode.id() == m_selectedFormatId; });
+        if (it == m_nativeModes.end()) return false;
+        const auto mode = *it;
+        m_nativeCapture = new V4l2MjpegCapture(QString::fromUtf8(device.id()), mode, this);
+        connect(m_nativeCapture, &V4l2MjpegCapture::frameReady, this,
+            [this, mode, first = true](const QImage &image) mutable {
+                if (!m_nativeCapture || sender() != m_nativeCapture) return;
+                m_nativeCapture->acknowledgeFrame();
+                m_filterPreviewWidget->updateImage(image);
+                emit aspectRatioChanged(double(image.width()) / image.height());
+                if (first) {
+                    first = false;
+                    updateStatus(tr("Preview running (%1)%2").arg(mode.label(),
+                        mode.fps() > 60.01 ? tr(" — HDR unavailable above 60 fps") : QString()));
+                    emit previewStarted();
+                }
+            });
+        connect(m_nativeCapture, &V4l2MjpegCapture::captureFailed, this, [this](const QString &error) {
+            if (!m_nativeCapture || sender() != m_nativeCapture) return;
+            stopPreview();
+            updateStatus(error);
+            emit previewFailed(error);
+        });
+        return true;
+    }
 
     m_camera = new QCamera(device, this);
     connect(m_camera, &QCamera::errorOccurred,
@@ -481,6 +536,41 @@ QCameraDevice CameraPreviewWidget::resolveCameraDevice() const
 void CameraPreviewWidget::refreshFormatOptions(const QCameraDevice &device)
 {
     if (!m_formatCombo) {
+        return;
+    }
+
+    m_nativeModes.clear();
+    if (device.description().contains(QStringLiteral("Meet SE"), Qt::CaseInsensitive))
+        m_nativeModes = V4l2MjpegCapture::modes(QString::fromUtf8(device.id()));
+    // Keep the menu concise: offer supported 30/60 fps modes at each
+    // resolution. Use a tight tolerance for interval quantization, rather
+    // than rounding 29.97/59.94 into duplicate 30/60 fps entries.
+    m_nativeModes.erase(std::remove_if(m_nativeModes.begin(), m_nativeModes.end(),
+        [](const auto &mode) {
+            return std::abs(mode.fps() - 30.0) > 0.01 &&
+                   std::abs(mode.fps() - 60.0) > 0.01;
+        }), m_nativeModes.end());
+    if (!m_nativeModes.isEmpty()) {
+        QSignalBlocker blocker(m_formatCombo);
+        m_formatCombo->clear();
+        for (const auto &mode : m_nativeModes) {
+            m_formatCombo->addItem(mode.label(), mode.id());
+        }
+        int index = m_formatCombo->findData(m_selectedFormatId);
+        if (index < 0) {
+            // Prefer 1080p60 over the maximum 100/150 fps. This also migrates
+            // old Qt range-based saved IDs to an HDR-compatible interval.
+            index = 0;
+            for (int i = 0; i < m_nativeModes.size(); ++i) {
+                if (m_nativeModes[i].fps() <= 60.01) { index = i; break; }
+            }
+        }
+        const QString id = m_formatCombo->itemData(index).toString();
+        m_formatCombo->setCurrentIndex(index);
+        if (id != m_selectedFormatId) {
+            m_selectedFormatId = id;
+            emit preferredFormatChanged(id);
+        }
         return;
     }
 

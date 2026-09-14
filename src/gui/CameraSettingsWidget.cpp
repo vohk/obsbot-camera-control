@@ -23,7 +23,7 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
 
     // HDR
     m_hdrCheckBox = new QCheckBox("HDR (High Dynamic Range)", this);
-    m_hdrCheckBox->setToolTip("Enhance image quality in high-contrast scenes");
+    m_hdrCheckBox->setToolTip("Enhance image quality in high-contrast scenes. Meet SE supports HDR up to 1080p at 60 fps. Allow at least 3 seconds between changes.");
     connect(m_hdrCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onHDRToggled);
     groupLayout->addWidget(m_hdrCheckBox);
 
@@ -146,8 +146,14 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
 void CameraSettingsWidget::onHDRToggled(bool checked)
 {
     m_userInitiated = true;
-    m_controller->setHDR(checked);
-    m_commandTimer->start(1000);
+    if (!m_controller->setHDR(checked)) {
+        setHDREnabled(m_controller->getCurrentState().hdrEnabled);
+        return;
+    }
+    // The SDK recommends at least three seconds between HDR switches.
+    m_hdrCheckBox->setEnabled(false);
+    QTimer::singleShot(3000, this, [this]() { m_hdrCheckBox->setEnabled(true); });
+    m_commandTimer->start(3000);
 }
 
 void CameraSettingsWidget::onFOVChanged(int index)

@@ -1,5 +1,7 @@
 # OBSBOT Control for Linux
 
+> **About this fork:** Based on [aaronsb/obsbot-camera-control](https://github.com/aaronsb/obsbot-camera-control), with a focus on OBSBOT Meet SE support and Bazzite. Changes include reliable SDK/HDR discovery, native MJPEG preview at supported 30/60 fps, improved virtual-camera detection, and a relocatable Qt bundle that can be built in Distrobox and run directly on the host. See the [build instructions](docs/BUILD.md#build-in-distrobox-run-on-bazzite) for setup. The original project documentation follows below.
+
 ![GitHub stars](https://img.shields.io/github/stars/aaronsb/obsbot-camera-control?style=social)
 ![GitHub forks](https://img.shields.io/github/forks/aaronsb/obsbot-camera-control?style=social)
 ![AUR version](https://img.shields.io/aur/version/obsbot-camera-control?label=AUR)
@@ -67,7 +69,7 @@ OBSBOT cameras have excellent Linux UVC support, but lack native control softwar
 | **OBSBOT Meet 2** | Full | All features supported. |
 | **OBSBOT Tiny 2 Lite** | Partial | Detection works. Preview device path needs SDK fix. ([#8](https://github.com/aaronsb/obsbot-camera-control/issues/8)) |
 | **OBSBOT Tiny 4K** | Partial | PTZ, HDR, manual image controls work. Auto-framing and face AE/focus don't. ([#13](https://github.com/aaronsb/obsbot-camera-control/issues/13), [#7](https://github.com/aaronsb/obsbot-camera-control/issues/7)) |
-| **OBSBOT Meet SE** | Partial | Basic compatibility confirmed. ([#9](https://github.com/aaronsb/obsbot-camera-control/issues/9)) |
+| **OBSBOT Meet SE** | Partial | HDR toggle verified with SDK v1.0.2; allow SDK discovery to finish. ([#9](https://github.com/aaronsb/obsbot-camera-control/issues/9)) |
 
 The SDK also lists: Tiny (original), Tiny SE, Meet (original), Meet 4K, Me, Tail Air, Tail 2, Tail 2S, HDMI Box, NDI Box. These are untested — if you have one, [open a compatibility report](https://github.com/aaronsb/obsbot-camera-control/issues/new?template=device_compatibility.md).
 
@@ -104,6 +106,12 @@ curl -fsSL https://raw.githubusercontent.com/aaronsb/obsbot-camera-control/main/
 - Checks dependencies (shows what to install if missing)
 - Builds and installs the application
 - Adds desktop launcher to your app menu
+
+### Bazzite / Distrobox
+
+Build a host-runnable bundle with `./scripts/build-bundle.sh` inside a compatible
+Fedora Distrobox, then launch `build-bundle/obsbot-control/obsbot-control` from the
+host. See [Bazzite build instructions](docs/BUILD.md#build-in-distrobox-run-on-bazzite).
 
 ### Standard Install
 

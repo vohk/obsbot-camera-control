@@ -5,6 +5,7 @@
 #include <QCamera>
 #include <QCameraFormat>
 #include "FilterPreviewWidget.h"
+#include "V4l2MjpegCapture.h"
 
 class QCameraDevice;
 class QComboBox;
@@ -33,6 +34,7 @@ public:
 
     bool isPreviewEnabled() const;
     void enablePreview(bool enabled);
+    void setHdrEnabled(bool enabled);
     void setCameraDeviceId(const QString &deviceId);
     QString cameraDeviceId() const { return m_requestedDeviceId; }
     QString preferredFormatId() const { return m_selectedFormatId; }
@@ -72,6 +74,9 @@ private:
     QCameraFormat chooseDefaultFormat() const;
     bool isJpegFormat(const QCameraFormat &format) const;
 
+    bool m_hdrEnabled = false;
+    V4l2MjpegCapture *m_nativeCapture = nullptr;
+    QList<V4l2MjpegCapture::Mode> m_nativeModes;
     QCamera *m_camera;
     QMediaCaptureSession *m_captureSession;
     QVideoSink *m_videoSink;

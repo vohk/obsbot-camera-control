@@ -183,6 +183,9 @@ FilterPreviewWidget::FilterPreviewWidget(QWidget *parent)
 
 FilterPreviewWidget::~FilterPreviewWidget()
 {
+    // QOpenGLWidget destroys the context after our GL members are destroyed.
+    // Do not let that base-destructor signal re-enter cleanup on dead members.
+    if (context()) disconnect(context(), nullptr, this, nullptr);
     if (isValid()) {
         makeCurrent();
         cleanupGLResources();
@@ -206,7 +209,11 @@ void FilterPreviewWidget::updateVideoFrame(const QVideoFrame &frame)
         return;
     }
 
-    QImage image = copy.toImage();
+    updateImage(copy.toImage());
+}
+
+void FilterPreviewWidget::updateImage(QImage image)
+{
     if (image.isNull()) {
         return;
     }

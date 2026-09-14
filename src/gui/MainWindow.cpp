@@ -3,6 +3,7 @@
 #include "VirtualCameraStreamer.h"
 
 #include <QMessageBox>
+#include <QInputDialog>
 #include <QWidget>
 #include <QIcon>
 #include <QEvent>
@@ -459,6 +460,22 @@ void MainWindow::setupUI()
     connect(m_virtualCameraDeviceEdit, &QLineEdit::editingFinished,
             this, &MainWindow::onVirtualCameraDeviceEdited);
     virtualDeviceLayout->addWidget(m_virtualCameraDeviceEdit, 1);
+    auto *detectVirtualCamera = new QPushButton(tr("Detect"), virtualCameraGroup);
+    connect(detectVirtualCamera, &QPushButton::clicked, this, [this]() {
+        const auto devices = VirtualCameraStreamer::availableDevices();
+        if (devices.isEmpty()) {
+            QMessageBox::information(this, tr("Virtual Camera"), tr("No accessible v4l2loopback devices found."));
+            return;
+        }
+        bool ok = true;
+        const QString path = devices.size() == 1 ? devices.first() :
+            QInputDialog::getItem(this, tr("Virtual Camera"), tr("Select an existing device:"), devices, 0, false, &ok);
+        if (ok) {
+            m_virtualCameraDeviceEdit->setText(path);
+            onVirtualCameraDeviceEdited();
+        }
+    });
+    virtualDeviceLayout->addWidget(detectVirtualCamera);
 
     virtualLayout->addLayout(virtualDeviceLayout);
 
@@ -466,6 +483,8 @@ void MainWindow::setupUI()
         tr("Virtual camera support requires the v4l2loopback kernel module."),
         virtualCameraGroup);
     m_virtualCameraStatusLabel->setWordWrap(true);
+    m_virtualCameraStatusLabel->setTextFormat(Qt::PlainText);
+    m_virtualCameraStatusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_virtualCameraStatusLabel->setObjectName("virtualCameraStatus");
     virtualLayout->addWidget(m_virtualCameraStatusLabel);
 
@@ -1103,6 +1122,9 @@ void MainWindow::onCameraDisconnected()
 
 void MainWindow::onStateChanged(const CameraController::CameraState &state)
 {
+    // Meet SE cannot produce HDR at its 100/150 fps modes.
+    m_previewWidget->setHdrEnabled(state.hdrEnabled &&
+        m_controller->getCameraInfo().productType == ObsbotProdMeetSE);
     // Update all widgets with new state
     m_trackingWidget->updateFromState(state);
     m_settingsWidget->updateFromState(state);
@@ -1177,13 +1199,20 @@ void MainWindow::updateVirtualCameraAvailability(const QString &devicePath)
     QString statusText;
     QString statusColor;
 
-    if (deviceExists) {
+    if (deviceExists && VirtualCameraStreamer::isLoopbackDevice(devicePath)) {
         statusText = tr("Virtual camera available (%1)").arg(devicePath);
         statusColor = QStringLiteral("#2e7d32");
         m_virtualCameraAvailable = true;
     } else if (moduleLoaded) {
-        statusText = tr("v4l2loopback is loaded, but %1 does not exist.\nRun: %2")
-                         .arg(devicePath, modprobeCommand);
+        const auto devices = VirtualCameraStreamer::availableDevices();
+        statusText = deviceExists
+            ? tr("%1 is not an accessible v4l2loopback device.").arg(devicePath)
+            : tr("v4l2loopback is loaded, but %1 does not exist.").arg(devicePath);
+        if (!devices.isEmpty())
+            statusText += tr("\nExisting devices: %1. Click Detect to select one.").arg(devices.join(", "));
+        else
+            statusText += tr("\nNo accessible loopback nodes found. Check device permissions and the host's v4l2loopback configuration.");
+        statusText += tr("\nRunning modprobe again does not change an already loaded module's devices.");
         statusColor = QStringLiteral("#b26a00");
         m_virtualCameraAvailable = false;
     } else {
@@ -1196,7 +1225,7 @@ void MainWindow::updateVirtualCameraAvailability(const QString &devicePath)
     m_virtualCameraStatusLabel->setText(statusText);
     m_virtualCameraStatusLabel->setStyleSheet(QStringLiteral("color: %1;").arg(statusColor));
     if (m_virtualCameraCheckbox) {
-        m_virtualCameraCheckbox->setToolTip(statusText);
+        m_virtualCameraCheckbox->setToolTip(tr("Send the processed live preview to the selected virtual camera."));
     }
 }
 
@@ -1824,7 +1853,7 @@ void MainWindow::onVirtualCameraToggled(bool enabled)
         if (!m_virtualCameraAvailable) {
             QMessageBox::information(this,
                 tr("Virtual Camera Not Available"),
-                tr("v4l2loopback is not active yet. See the status message below for setup instructions."));
+                tr("The selected virtual camera is unavailable. Use Detect or see the status message below."));
         } else if (!m_previewWidget->isPreviewEnabled()) {
             QMessageBox::information(this,
                 tr("Virtual Camera Ready"),

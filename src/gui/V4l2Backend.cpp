@@ -172,3 +172,16 @@ bool V4l2Backend::setAutoFocus(bool enabled) { return setControl(V4L2_CID_FOCUS_
 bool V4l2Backend::getAutoFocus() { return getControl(V4L2_CID_FOCUS_AUTO) == 1; }
 bool V4l2Backend::setFocusAbsolute(int value) { return setControl(V4L2_CID_FOCUS_ABSOLUTE, value); }
 int V4l2Backend::getFocusAbsolute() { return getControl(V4L2_CID_FOCUS_ABSOLUTE); }
+
+// Read negotiated sensor cadence, not Qt's advertised maximum.
+double V4l2Backend::frameRateForDevice(const std::string &path)
+{
+    int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return 0;
+    v4l2_streamparm parm{};
+    parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    const bool ok = ioctl(fd, VIDIOC_G_PARM, &parm) == 0;
+    ::close(fd);
+    const auto interval = parm.parm.capture.timeperframe;
+    return ok && interval.numerator ? double(interval.denominator) / interval.numerator : 0;
+}
