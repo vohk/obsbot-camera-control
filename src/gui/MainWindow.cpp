@@ -1512,9 +1512,9 @@ void MainWindow::onPreviewStarted()
 
 void MainWindow::onPreviewFailed(const QString &error)
 {
-    Q_UNUSED(error);
-    // Show warning when preview fails
-    QString warningText = "⚠ Cannot open camera preview";
+    QString warningText = error.isEmpty()
+        ? tr("Camera preview failed")
+        : tr("Camera preview failed: %1").arg(error);
 
     // Try to detect which process is using the camera
     const QString failedDevice = m_detectedCameras.isEmpty()
@@ -1525,8 +1525,6 @@ void MainWindow::onPreviewFailed(const QString &error)
     QString process = getProcessUsingCamera(failedDevice);
     if (!process.isEmpty()) {
         warningText += "\n(In use by: " + process + ")";
-    } else {
-        warningText += "\n(In use by another application)";
     }
 
     m_cameraWarningLabel->setText(warningText);

@@ -495,32 +495,14 @@ QCameraDevice CameraPreviewWidget::resolveCameraDevice() const
         return QCameraDevice();
     }
 
-    auto matchesDeviceId = [this](const QCameraDevice &device) -> bool {
-        if (m_requestedDeviceId.isEmpty()) {
-            return false;
+    if (!m_requestedDeviceId.isEmpty()) {
+        for (const QCameraDevice &device : cameras) {
+            if (QString::fromUtf8(device.id()) == m_requestedDeviceId) {
+                return device;
+            }
         }
-
-        const QString idString = QString::fromUtf8(device.id());
-        if (idString == m_requestedDeviceId) {
-            return true;
-        }
-
-        if (idString.contains(m_requestedDeviceId, Qt::CaseInsensitive)) {
-            return true;
-        }
-
-        const QString description = device.description();
-        if (description.contains(m_requestedDeviceId, Qt::CaseInsensitive)) {
-            return true;
-        }
-
-        return false;
-    };
-
-    for (const QCameraDevice &device : cameras) {
-        if (matchesDeviceId(device)) {
-            return device;
-        }
+        // A selected camera disappearing must not open a different device.
+        return QCameraDevice();
     }
 
     for (const QCameraDevice &device : cameras) {

@@ -1,4 +1,5 @@
 #include "V4l2MjpegCapture.h"
+#include "CaptureProgress.h"
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
@@ -121,17 +122,17 @@ void V4l2MjpegCapture::run()
         auto type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         if (query(fd, VIDIOC_STREAMON, &type) < 0) { fail("Start capture"); break; }
         streaming = true;
-        int idlePolls = 0;
+        CaptureProgress progress(CaptureProgress::Clock::now());
         while (!isInterruptionRequested()) {
+            if (progress.stalled(CaptureProgress::Clock::now())) {
+                error = "Camera did not deliver frames for five seconds";
+                break;
+            }
             pollfd event{fd, POLLIN, 0};
             int ready = poll(&event, 1, 250);
             if (ready < 0 && errno == EINTR) continue;
             if (ready < 0) { fail("Poll capture"); break; }
-            if (ready == 0) {
-                if (++idlePolls >= 20) { error = "Camera did not deliver frames for five seconds"; break; }
-                continue;
-            }
-            idlePolls = 0;
+            if (ready == 0) continue;
             if (event.revents & (POLLERR | POLLHUP | POLLNVAL)) { error = "Camera disconnected or capture failed"; break; }
             v4l2_buffer buffer{};
             buffer.type = type;
@@ -143,6 +144,7 @@ void V4l2MjpegCapture::run()
             if (buffer.index >= buffers.size() || buffer.bytesused > buffers[buffer.index].length) {
                 error = "Camera returned an invalid capture buffer"; break;
             }
+            progress.bufferReceived(CaptureProgress::Clock::now());
             QImage image;
             if (!m_pending && !(buffer.flags & V4L2_BUF_FLAG_ERROR))
                 image = QImage::fromData(static_cast<const uchar *>(buffers[buffer.index].data), int(buffer.bytesused), "JPEG");
